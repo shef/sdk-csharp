@@ -9,6 +9,7 @@ using McMaster.Extensions.CommandLineUtils;
 using Newtonsoft.Json;
 using System;
 using System.ComponentModel.DataAnnotations;
+using System.Net;
 using System.Net.Http;
 using System.Net.Mime;
 using System.Threading.Tasks;
@@ -19,36 +20,57 @@ namespace HttpSend
     // line and calling the application code. The [Option] attributes designate the parameters.
     class Program
     {
-        [Option(Description = "CloudEvents 'source' (default: urn:example-com:mysource:abc)", LongName = "source",
+        [Option(Description = "CloudEvents 'source'", LongName = "source",
             ShortName = "s")]
         private string Source { get; } = "urn:example-com:mysource:abc";
 
-        [Option(Description = "CloudEvents 'type' (default: com.example.myevent)", LongName = "type", ShortName = "t")]
+        [Option(Description = "CloudEvents 'type'", LongName = "type", ShortName = "t")]
         private string Type { get; } = "com.example.myevent";
+        [Option(Description = "CloudEvents 'subject'", LongName = "subject", ShortName = "")]
+        private string Subject { get; } = "dotnetSampleApp";
 
         [Required,Option(Description = "HTTP(S) address to send the event to", LongName = "url", ShortName = "u"),]
         private Uri Url { get; }
 
-        public static int Main(string[] args) => CommandLineApplication.Execute<Program>(args);
+        [Option(Description = "Accept any SSL/TLS certificate including self-signed")]
+        private bool Insecure { get; }
+        [Option(Description = "HTTP Basic Auth username", LongName = "username", ShortName = "U")]
+        private string User { get; }
+        [Option(Description = "HTTP Basic Auth password", LongName = "password", ShortName = "P")]
+        private string Password { get; }
 
+        public static Task<int> Main(string[] args) => CommandLineApplication.ExecuteAsync<Program>(args);
         private async Task OnExecuteAsync()
         {
             var cloudEvent = new CloudEvent
             {
+                Id = Guid.NewGuid().ToString(),
                 Type = Type,
                 Source = new Uri(Source),
                 DataContentType = MediaTypeNames.Application.Json,
+                Subject = Subject,
                 Data = JsonConvert.SerializeObject("hey there!")
             };
 
             var content = cloudEvent.ToHttpContent(ContentMode.Structured, new JsonEventFormatter());
 
-            var httpClient = new HttpClient();
-            // your application remains in charge of adding any further headers or 
-            // other information required to authenticate/authorize or otherwise
-            // dispatch the call at the server.
-            var result = (await httpClient.PostAsync(this.Url, content));
+            var httpClientHandler = new HttpClientHandler();
+ 
+            if (Insecure)
+            {
+                httpClientHandler.ServerCertificateCustomValidationCallback =
+                    (message, cert, chain, sslPolicyErrors) => true;
+            }
 
+            if (User != null)
+            {
+                httpClientHandler.UseDefaultCredentials = true;
+                httpClientHandler.Credentials = new NetworkCredential(User, Password);
+            }
+            
+            var httpClient = new HttpClient(httpClientHandler);
+            var result = (await httpClient.PostAsync(this.Url, content));
+            
             Console.WriteLine(result.StatusCode);
         }
     }
